@@ -6,6 +6,8 @@ from users.views import RegisterView, MyTokenObtainPairView, UserProfileView
 from tenants.views import TenantViewSet, MeTenantView
 from bookings.views import CourtViewSet, BookingViewSet, SlotAvailabilityView, SlotViewSet, DashboardAnalyticsView
 from rest_framework_simplejwt.views import TokenRefreshView
+from django.conf import settings
+from django.conf.urls.static import static
 
 router = routers.DefaultRouter()
 router.register(r'tenants', TenantViewSet)
@@ -18,6 +20,7 @@ tenants_router.register(r'bookings', BookingViewSet, basename='tenant-bookings')
 
 # Root routers for general access (optional, but keep for now)
 router.register(r'bookings', BookingViewSet, basename='booking')
+router.register(r'courts', CourtViewSet, basename='court')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -34,4 +37,4 @@ urlpatterns = [
     path('api/my-tenant/', MeTenantView.as_view({'get': 'list'}), name='my_tenant'),
     path('api/availability/', SlotAvailabilityView.as_view(), name='slot_availability'),
     path('api/dashboard/<str:metric>/', DashboardAnalyticsView.as_view(), name='dashboard_analytics'),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

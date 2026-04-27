@@ -133,6 +133,10 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Media files (uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 # Custom User Model
 AUTH_USER_MODEL = 'users.User'
 
@@ -149,8 +153,8 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '5/minute', # Strict for public endpoints
-        'user': '1000/day'
+        'anon': '1000/minute',  # Increased for development
+        'user': '10000/day'  # Increased for development
     }
 }
 
