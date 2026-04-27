@@ -1,0 +1,49 @@
+
+  <!DOCTYPE html>
+  <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5, user-scalable=yes" />
+      <meta name="apple-mobile-web-app-capable" content="yes" />
+      <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+      <meta name="apple-mobile-web-app-title" content="TurfManager" />
+      <meta name="theme-color" content="#10b981" />
+      <title>B2B Turf Management SaaS UI</title>
+      <style>
+        html, body { 
+          height: 100%; 
+          margin: 0; 
+          -webkit-font-smoothing: antialiased;
+          -webkit-touch-callout: none;
+          -webkit-user-select: none;
+        } 
+        #root { height: 100%; }
+        /* Prevent zoom on input focus for iOS */
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"],
+        input[type="number"],
+        textarea,
+        select {
+          font-size: 16px;
+        }
+        /* Better scrolling on mobile */
+        body {
+          -webkit-overflow-scrolling: touch;
+        }
+        /* Ensure proper safe area support for notched devices */
+        @supports(padding: max(0px)) {
+          body {
+            padding-left: env(safe-area-inset-left);
+            padding-right: env(safe-area-inset-right);
+          }
+        }
+      </style>
+    </head>
+
+    <body>
+      <div id="root"></div>
+      <script type="module" src="/src/main.tsx"></script>
+    </body>
+  </html>
+  

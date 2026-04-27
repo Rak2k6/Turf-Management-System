@@ -1,0 +1,187 @@
+/* Mobile-First Responsive Optimizations */
+
+/* Ensure touch-friendly tap targets on all interactive elements */
+@media (max-width: 768px) {
+
+    /* Minimum touch target size (44x44px) */
+    button,
+    a[role="button"],
+    input[type="button"],
+    input[type="submit"],
+    input[type="reset"],
+    [role="button"] {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* Improve input field sizing on mobile */
+    input,
+    textarea,
+    select {
+        min-height: 44px;
+        font-size: 16px;
+        /* Prevents zoom on iOS */
+    }
+
+    /* Better table scrolling on mobile */
+    table {
+        font-size: 14px;
+    }
+
+    /* Improve form spacing on mobile */
+    form {
+        gap: 8px;
+    }
+
+    label {
+        font-size: 16px;
+    }
+
+    /* Better card spacing on mobile */
+    .rounded-xl {
+        border-radius: 12px;
+    }
+
+    /* Improve readability on small screens */
+    body {
+        font-size: 14px;
+        line-height: 1.6;
+    }
+
+    h1 {
+        font-size: 20px;
+        line-height: 1.4;
+    }
+
+    h2 {
+        font-size: 18px;
+        line-height: 1.4;
+    }
+
+    h3 {
+        font-size: 16px;
+        line-height: 1.4;
+    }
+
+    /* Hide horizontal scrollbar on mobile by improving overflow handling */
+    body {
+        overflow-x: hidden;
+    }
+
+    /* Improve Recharts visibility on mobile */
+    .recharts-wrapper {
+        width: 100% !important;
+    }
+
+    .recharts-surface {
+        max-width: 100%;
+    }
+
+    /* Reduce padding on small containers */
+    .px-6 {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+
+    .py-4 {
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+
+    /* Improve dropdown menus on mobile */
+    [role="dialog"],
+    [role="menu"] {
+        max-width: calc(100vw - 16px);
+    }
+}
+
+/* Tablet optimizations (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+
+    /* Reduce font sizes on tablets */
+    body {
+        font-size: 15px;
+    }
+
+    h1 {
+        font-size: 24px;
+    }
+
+    /* Improve spacing for tablet screens */
+    .gap-6 {
+        gap: 16px;
+    }
+}
+
+/* Landscape mode optimizations */
+@media (max-height: 600px) {
+
+    /* Reduce padding in landscape mode */
+    .p-6 {
+        padding: 12px;
+    }
+
+    .py-6 {
+        padding-top: 12px;
+        padding-bottom: 12px;
+    }
+
+    /* Reduce header height in landscape */
+    header {
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+}
+
+/* Improve performance with will-change on scrollable elements */
+main {
+    contain: layout style paint;
+}
+
+/* Prevent flickering on iOS Safari */
+* {
+    -webkit-backface-visibility: hidden;
+    -webkit-perspective: 1000;
+}
+
+/* Better focus styles for keyboard navigation */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+    outline: 2px solid #10b981;
+    outline-offset: 2px;
+}
+
+/* Smooth scrolling on supported browsers */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* Dark mode improvements for OLED screens */
+@media (prefers-color-scheme: dark) {
+
+    /* Use pure black backgrounds to save battery on OLED */
+    body {
+        background-color: #000000;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: more) {
+    * {
+        border-width: 2px;
+    }
+}

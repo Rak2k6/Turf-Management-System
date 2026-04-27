@@ -1,0 +1,26 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+@import './mobile.css';
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: 'Poppins', sans-serif;
+}
+
+/* Color browser-native time/date picker icons to green */
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(48%) sepia(79%) saturate(2476%) hue-rotate(120deg) brightness(118%) contrast(119%);
+    cursor: pointer;
+}
