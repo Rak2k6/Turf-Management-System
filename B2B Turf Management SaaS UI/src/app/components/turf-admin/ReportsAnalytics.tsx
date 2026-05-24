@@ -1,8 +1,10 @@
-import { Calendar, DollarSign, Users, TrendingUp, Download, Loader2 } from 'lucide-react';
+import { Calendar, DollarSign, Users, TrendingUp, Download } from 'lucide-react';
 import { StatCard } from '../shared/StatCard';
+import { SkeletonCard } from '../shared/SkeletonCard';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
+import { toast } from 'sonner';
 
 export function ReportsAnalytics() {
   const [loading, setLoading] = useState(true);
@@ -15,6 +17,7 @@ export function ReportsAnalytics() {
         setData(response.data);
       } catch (error) {
         console.error('Failed to fetch reports analytics', error);
+        toast.error('Failed to load reports. Please try refreshing.');
       } finally {
         setLoading(false);
       }
@@ -24,8 +27,15 @@ export function ReportsAnalytics() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="space-y-6">
+        {/* KPI skeleton row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+          <SkeletonCard type="stat" count={4} />
+        </div>
+        {/* Charts skeleton row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+          <SkeletonCard type="chart" count={2} />
+        </div>
       </div>
     );
   }

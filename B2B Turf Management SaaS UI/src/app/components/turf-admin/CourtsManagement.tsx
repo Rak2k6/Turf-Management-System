@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 import { Building2, Plus, Edit, Trash2, Power, X, Loader2, Clock } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { api } from '../../services/api';
+import { SkeletonCard } from '../shared/SkeletonCard';
+import { courtService } from '../../services/courtService';
+import { extractApiError } from '../../services/api';
+import { toast } from 'sonner';
 
 interface Court {
   id: number;
@@ -58,21 +61,13 @@ export function CourtsManagement() {
     try {
       setLoading(true);
       setError(null);
-      const response = await api.get('/courts/');
-      setCourts(response.data.results || response.data);
-    } catch (err: any) {
+      const courtList = await courtService.getCourts();
+      setCourts(courtList);
+    } catch (err) {
       console.error('Error fetching courts:', err);
-      // Only set error if we don't have courts yet
-      if (courts.length === 0) {
-        setError('Failed to load courts. Using local data.');
-        // Fallback to local data
-        setCourts([
-          { id: 1, name: 'Court A', sport_type: 'FOOTBALL', size: '100x60 ft', status: 'ACTIVE', base_price_per_hour: 50, peak_hour_price: 80, tenant: 1 },
-          { id: 2, name: 'Court B', sport_type: 'CRICKET', size: '120x80 ft', status: 'ACTIVE', base_price_per_hour: 50, peak_hour_price: 80, tenant: 1 },
-          { id: 3, name: 'Court C', sport_type: 'FOOTBALL', size: '100x60 ft', status: 'MAINTENANCE', base_price_per_hour: 50, peak_hour_price: 80, tenant: 1 },
-          { id: 4, name: 'Court D', sport_type: 'BADMINTON', size: '44x20 ft', status: 'ACTIVE', base_price_per_hour: 40, peak_hour_price: 60, tenant: 1 },
-        ]);
-      }
+      const message = extractApiError(err);
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -81,6 +76,17 @@ export function CourtsManagement() {
   useEffect(() => {
     fetchCourts();
   }, []);
+
+  useEffect(() => {
+    if (showAddModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [showAddModal]);
 
   const handleOpenModal = (court?: Court) => {
     if (court) {
@@ -197,36 +203,46 @@ export function CourtsManagement() {
       payload.append('status', 'ACTIVE');
       if (imageFile) payload.append('image', imageFile);
 
-      const config = { headers: { 'Content-Type': 'multipart/form-data' } };
-
       if (editingId) {
-        await api.patch(`/courts/${editingId}/`, payload, config);
+        await courtService.updateCourt(editingId, payload);
+        toast.success('Court updated successfully');
       } else {
-        await api.post('/courts/', payload, config);
+        await courtService.createCourt(payload);
+        toast.success('Court created successfully');
       }
 
       handleCloseModal();
       await fetchCourts();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error saving court:', err);
-      setError(err.response?.data?.detail || err.response?.data?.name?.[0] || 'Failed to save court');
+      setError(extractApiError(err));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this court?')) return;
-
-    try {
-      setError(null);
-      await api.delete(`/courts/${id}/`);
-      // Refetch courts to get fresh data
-      await fetchCourts();
-    } catch (err: any) {
-      console.error('Error deleting court:', err);
-      setError(err.response?.data?.detail || 'Failed to delete court');
-    }
+  const handleDelete = async (id: number, name: string) => {
+    toast.warning(`Delete "${name}"?`, {
+      description: 'This action cannot be undone.',
+      action: {
+        label: 'Delete',
+        onClick: async () => {
+          try {
+            await courtService.deleteCourt(id);
+            toast.success('Court deleted successfully');
+            await fetchCourts();
+          } catch (err) {
+            const message = extractApiError(err);
+            setError(message);
+            toast.error(message);
+          }
+        },
+      },
+      cancel: {
+        label: 'Cancel',
+        onClick: () => {},
+      },
+    });
   };
 
   return (
@@ -258,8 +274,8 @@ export function CourtsManagement() {
 
       {/* Loading State */}
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 text-[#10b981] animate-spin" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+          <SkeletonCard type="stat" count={3} />
         </div>
       ) : (
         /* Courts Grid */
@@ -312,8 +328,8 @@ export function CourtsManagement() {
                       >
                         <Edit className="w-4 h-4 text-[#3b82f6]" />
                       </button>
-                      <button
-                        onClick={() => handleDelete(court.id)}
+                    <button
+                        onClick={() => handleDelete(court.id, court.name)}
                         className="p-2 hover:bg-muted rounded-lg transition-colors"
                       >
                         <Trash2 className="w-4 h-4 text-[#ef4444]" />

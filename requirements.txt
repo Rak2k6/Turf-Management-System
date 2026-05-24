@@ -1,6 +1,17 @@
-django>=5.0
-djangorestframework
-djangorestframework-simplejwt
-django-cors-headers
-django-filter
-drf-nested-routers
+# Django Core
+django>=5.0,<6.0
+django-environ>=0.11.0
+
+# API & Auth
+djangorestframework>=3.14.0
+djangorestframework-simplejwt>=5.3.0
+django-cors-headers>=4.3.0
+django-filter>=23.5
+
+# Routing & Extensions
+drf-nested-routers>=0.93.0
+
+# Production & Hardening
+gunicorn>=21.2.0
+whitenoise[brotli]>=6.6.0
+psycopg2-binary>=2.9.0  # Optional: For PostgreSQL production use

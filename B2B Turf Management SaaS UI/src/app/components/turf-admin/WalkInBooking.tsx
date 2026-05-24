@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, DollarSign, CheckCircle, Users, ChevronLeft, Loader2 } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, extractApiError } from '../../services/api';
+import { toast } from 'sonner';
 
 interface Court {
   id: number;
@@ -51,8 +52,7 @@ export function WalkInBooking() {
           setSelectedCourt(courtList[0].id);
         }
       } catch (err) {
-        console.error('Error fetching courts:', err);
-        setError('Failed to load courts');
+        toast.error(extractApiError(err));
       } finally {
         setLoading(false);
       }
@@ -188,7 +188,7 @@ export function WalkInBooking() {
 
       await Promise.all(bookingPromises);
 
-      // Success - reset form
+      // Success — reset form
       setStep(1);
       setSelectedCourt(courts.length > 0 ? courts[0].id : null);
       setSelectedDate(new Date().toISOString().split('T')[0]);
@@ -197,11 +197,10 @@ export function WalkInBooking() {
       setCustomerName('');
       setCustomerPhone('');
       setRefreshTrigger(prev => prev + 1);
-      
-      alert('✓ Booking confirmed successfully!');
-    } catch (err: any) {
-      console.error('Error confirming booking:', err);
-      setError(err.response?.data?.detail || 'Failed to confirm booking');
+
+      toast.success('Booking confirmed successfully!');
+    } catch (err) {
+      toast.error(extractApiError(err));
     } finally {
       setSubmitting(false);
     }

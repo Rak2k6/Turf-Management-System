@@ -138,11 +138,11 @@ main {
     contain: layout style paint;
 }
 
-/* Prevent flickering on iOS Safari */
-* {
+/* Prevent flickering on iOS Safari - commented out because global perspective breaks fixed viewport positioning */
+/* * {
     -webkit-backface-visibility: hidden;
     -webkit-perspective: 1000;
-}
+} */
 
 /* Better focus styles for keyboard navigation */
 button:focus-visible,

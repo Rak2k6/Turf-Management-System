@@ -4,89 +4,138 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from .models import Court, Booking, Slot
 from .serializers import CourtSerializer, BookingSerializer, SlotSerializer
-from .permissions import IsTenantOwner, IsStaffOrOwner, IsBookingOwner
+from .permissions import IsTenantOwner, IsStaffOrOwner, IsBookingOwner, IsSuperAdmin
+from .mixins import StandardResponseMixin
 from django.utils import timezone
 from datetime import datetime, timedelta
 from django.db.models import Q, Sum, Count
 from django_filters.rest_framework import DjangoFilterBackend
+
+
+def _get_user_tenant(user):
+    """Helper to get the tenant for an authenticated user."""
+    if user.role == 'SUPER_ADMIN':
+        return None  # Super admin can see all
+    if hasattr(user, 'owned_tenant'):
+        try:
+            return user.owned_tenant
+        except Exception:
+            return None
+    return None
+
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
 
-class CourtViewSet(viewsets.ModelViewSet):
+
+# ──────────────────────────────────────────────────────────────────────
+#  Court ViewSet
+# ──────────────────────────────────────────────────────────────────────
+class CourtViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     serializer_class = CourtSerializer
-    queryset = Court.objects.all()
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['tenant', 'sport_type', 'is_active']
+    filterset_fields = ['sport_type', 'is_active', 'status']
     search_fields = ['name']
     ordering_fields = ['name', 'base_price_per_hour']
 
     def get_permissions(self):
-        # For development/testing: allow all users to manage courts
-        # TODO: In production, change back to [IsTenantOwner()] for write operations
-        return [permissions.AllowAny()]
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), IsTenantOwner()]
+        # Read-only actions (list/retrieve) — any authenticated user
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        # Handle Nested Router Case: /api/tenants/{tenant_pk}/courts/
-        tenant_pk = self.kwargs.get('tenant_lookup') # from NestedSimpleRouter lookup='tenant'
-        if tenant_pk:
-            return Court.objects.filter(tenant_id=tenant_pk)
-            
-        queryset = Court.objects.all()
-        tenant_id = self.request.query_params.get('tenant_id')
-        if tenant_id:
-            queryset = queryset.filter(tenant_id=tenant_id)
-        return queryset
+        user = self.request.user
 
-    def perform_create(self, serializer):
+        # Handle Nested Router Case: /api/tenants/{tenant_pk}/courts/
         tenant_pk = self.kwargs.get('tenant_lookup')
         if tenant_pk:
+            # Nested route — still enforce ownership for non-super-admins
+            if user.role == 'TURF_ADMIN':
+                tenant = _get_user_tenant(user)
+                if tenant and str(tenant.id) != str(tenant_pk):
+                    return Court.objects.none()
+            return Court.objects.filter(tenant_id=tenant_pk)
+
+        # Super admin sees everything
+        if user.role == 'SUPER_ADMIN':
+            return Court.objects.all()
+
+        # Turf admin / staff — see only their own tenant's courts
+        if user.role in ('TURF_ADMIN', 'STAFF'):
+            tenant = _get_user_tenant(user)
+            if tenant:
+                return Court.objects.filter(tenant=tenant)
+            return Court.objects.none()
+
+        # Customers — see all active courts (read-only, filtered by is_active)
+        return Court.objects.filter(is_active=True, status='ACTIVE')
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        tenant_pk = self.kwargs.get('tenant_lookup')
+
+        if tenant_pk:
             # Verify ownership if nested
-            if self.request.user.is_authenticated and hasattr(self.request.user, 'role'):
-                if self.request.user.role == 'TURF_ADMIN' and str(self.request.user.owned_tenant.id) != tenant_pk:
-                    raise permissions.PermissionDenied("You do not own this tenant.")
+            if user.role == 'TURF_ADMIN' and str(user.owned_tenant.id) != tenant_pk:
+                raise permissions.PermissionDenied("You do not own this tenant.")
             serializer.save(tenant_id=tenant_pk)
         else:
-            # For development/testing: allow creating courts with default tenant
-            # TODO: In production, require authenticated user with owned_tenant
-            if self.request.user.is_authenticated and hasattr(self.request.user, 'owned_tenant'):
-                serializer.save(tenant=self.request.user.owned_tenant)
+            # Infer tenant from authenticated user — never trust frontend
+            tenant = _get_user_tenant(user)
+            if tenant:
+                serializer.save(tenant=tenant)
             else:
-                # Use first tenant or require tenant_id parameter
-                from tenants.models import Tenant
-                default_tenant = Tenant.objects.first()
-                if default_tenant:
-                    serializer.save(tenant=default_tenant)
-                else:
-                    raise permissions.PermissionDenied("No tenant available. Please create a tenant first.")
+                raise permissions.PermissionDenied(
+                    "No tenant associated with your account. Please contact support."
+                )
 
-class SlotViewSet(viewsets.ModelViewSet):
+
+# ──────────────────────────────────────────────────────────────────────
+#  Slot ViewSet
+# ──────────────────────────────────────────────────────────────────────
+class SlotViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     serializer_class = SlotSerializer
-    queryset = Slot.objects.all()
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['court', 'is_active']
     ordering_fields = ['start_time']
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsTenantOwner()]
-        return [permissions.AllowAny()]
+            return [permissions.IsAuthenticated(), IsTenantOwner()]
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
+        user = self.request.user
+
         tenant_pk = self.kwargs.get('tenant_lookup')
         if tenant_pk:
+            if user.role == 'TURF_ADMIN':
+                tenant = _get_user_tenant(user)
+                if tenant and str(tenant.id) != str(tenant_pk):
+                    return Slot.objects.none()
             return Slot.objects.filter(court__tenant_id=tenant_pk)
-            
-        queryset = Slot.objects.all()
-        court_id = self.request.query_params.get('court')
-        if court_id:
-            queryset = queryset.filter(court_id=court_id)
-        return queryset
 
-class BookingViewSet(viewsets.ModelViewSet):
+        if user.role == 'SUPER_ADMIN':
+            return Slot.objects.all()
+
+        if user.role in ('TURF_ADMIN', 'STAFF'):
+            tenant = _get_user_tenant(user)
+            if tenant:
+                return Slot.objects.filter(court__tenant=tenant)
+            return Slot.objects.none()
+
+        # Customers — only active slots on active courts
+        return Slot.objects.filter(is_active=True, court__is_active=True, court__status='ACTIVE')
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  Booking ViewSet
+# ──────────────────────────────────────────────────────────────────────
+class BookingViewSet(StandardResponseMixin, viewsets.ModelViewSet):
     serializer_class = BookingSerializer
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
@@ -94,51 +143,63 @@ class BookingViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'date', 'start_time']
 
     def get_permissions(self):
-        # For development/testing: allow all users to view and create bookings
-        # Walk-in bookings must be creatable by anonymous users
-        return [permissions.AllowAny()]
+        # Customers can create bookings; only owners/staff can update/delete
+        if self.action in ['update', 'partial_update', 'destroy', 'confirm', 'cancel']:
+            return [permissions.IsAuthenticated(), IsBookingOwner()]
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         user = self.request.user
         tenant_pk = self.kwargs.get('tenant_lookup')
-        
-        base_queryset = Booking.objects.all()
+
+        base_queryset = Booking.objects.select_related('court', 'court__tenant', 'slot', 'customer')
+
         if tenant_pk:
+            # Nested route — enforce tenant ownership
+            if user.role == 'TURF_ADMIN':
+                tenant = _get_user_tenant(user)
+                if tenant and str(tenant.id) != str(tenant_pk):
+                    return Booking.objects.none()
             base_queryset = base_queryset.filter(court__tenant_id=tenant_pk)
 
-        # For development/testing: allow anonymous users to see all bookings
-        # This allows dashboard to display walk-in bookings created by anonymous users
-        # TODO: In production, restrict based on user role
-        if not user.is_authenticated:
-            # For development: return all bookings for anonymous users
-            # (anonymous users can see what bookings exist)
+        # Super admin sees everything
+        if user.role == 'SUPER_ADMIN':
             return base_queryset.order_by('-created_at')
-        
-        # Handle authenticated users based on role
-        if hasattr(user, 'role'):
-            if user.role == 'SUPER_ADMIN':
-                return base_queryset.order_by('-created_at')
-            elif user.role == 'TURF_ADMIN':
-                # Tenant owners only see their own tenant's bookings
-                return base_queryset.filter(court__tenant__owner=user).order_by('-created_at')
-        
-        # Customers see their own bookings (optionally filtered by tenant if nested)
+
+        # Turf admin sees their own tenant's bookings
+        if user.role in ('TURF_ADMIN', 'STAFF'):
+            tenant = _get_user_tenant(user)
+            if tenant:
+                return base_queryset.filter(court__tenant=tenant).order_by('-created_at')
+            return Booking.objects.none()
+
+        # Customers see ONLY their own bookings — strict isolation
         return base_queryset.filter(customer=user).order_by('-created_at')
 
     def perform_create(self, serializer):
-        # For walk-in bookings (anonymous users), don't set customer
-        # For authenticated users, automatically set as customer
-        if self.request.user.is_authenticated:
-            serializer.save(customer=self.request.user)
-        else:
+        user = self.request.user
+
+        # For turf admins creating walk-in bookings
+        if user.role in ['TURF_ADMIN', 'SUPER_ADMIN', 'STAFF']:
+            # Validate the court belongs to the user's tenant
+            court = serializer.validated_data.get('court')
+            if user.role == 'TURF_ADMIN' and court:
+                tenant = _get_user_tenant(user)
+                if tenant and court.tenant != tenant:
+                    raise permissions.PermissionDenied(
+                        "You cannot create bookings for courts outside your organization."
+                    )
             serializer.save()
+        else:
+            # Customer booking — force-set themselves as customer (never trust frontend)
+            serializer.save(customer=user)
 
     @action(detail=False, methods=['get'], url_path='my-bookings')
     def my_bookings(self, request):
         """
         Custom endpoint for users to see their own bookings.
         """
-        queryset = self.get_queryset().filter(customer=request.user)
+        queryset = Booking.objects.filter(customer=request.user).order_by('-created_at')
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -148,39 +209,73 @@ class BookingViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
-    def confirm(self, request, pk=None):
+    def confirm(self, request, pk=None, **kwargs):
         booking = self.get_object()
         if booking.status == 'CANCELLED':
-            return Response({"error": "Cannot confirm a cancelled booking"}, status=400)
+            return Response(
+                {"success": False, "message": "Cannot confirm a cancelled booking."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
         booking.status = 'CONFIRMED'
         booking.save()
-        return Response({'status': 'booking confirmed'})
+        return Response({"success": True, "message": "Booking confirmed."})
 
     @action(detail=True, methods=['post'])
-    def cancel(self, request, pk=None):
+    def cancel(self, request, pk=None, **kwargs):
         booking = self.get_object()
+        if booking.status == 'CANCELLED':
+            return Response(
+                {"success": False, "message": "Booking is already cancelled."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
         booking.status = 'CANCELLED'
         booking.save()
-        return Response({'status': 'booking cancelled'})
+        return Response({"success": True, "message": "Booking cancelled."})
 
 
+# ──────────────────────────────────────────────────────────────────────
+#  Slot Availability (public-ish)
+# ──────────────────────────────────────────────────────────────────────
 class SlotAvailabilityView(views.APIView):
-    permission_classes = [permissions.AllowAny]
+    """
+    Public-ish endpoint to check slot availability for a court on a date.
+    Still requires authentication to ensure tenant context.
+    """
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         court_id = request.query_params.get('court')
-        date_str = request.query_params.get('date') # YYYY-MM-DD
+        date_str = request.query_params.get('date')  # YYYY-MM-DD
 
         if not court_id or not date_str:
-            return Response({"error": "court and date are required"}, status=400)
+            return Response(
+                {"success": False, "message": "court and date are required."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             court = Court.objects.get(id=court_id)
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         except Court.DoesNotExist:
-             return Response({"error": "Court not found"}, status=404)
+            return Response(
+                {"success": False, "message": "Court not found."},
+                status=http_status.HTTP_404_NOT_FOUND,
+            )
         except ValueError:
-             return Response({"error": "Invalid date format"}, status=400)
+            return Response(
+                {"success": False, "message": "Invalid date format. Use YYYY-MM-DD."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verify the requesting user can access this court
+        user = request.user
+        if user.role == 'TURF_ADMIN':
+            tenant = _get_user_tenant(user)
+            if tenant and court.tenant != tenant:
+                return Response(
+                    {"success": False, "message": "Court not found."},
+                    status=http_status.HTTP_404_NOT_FOUND,
+                )
 
         # Fetch defined slots for this court
         slots = Slot.objects.filter(court=court, is_active=True).order_by('start_time')
@@ -201,47 +296,66 @@ class SlotAvailabilityView(views.APIView):
                 "is_available": slot.id not in booked_slot_ids
             })
 
-        return Response(available_slots)
+        return Response({"success": True, "data": available_slots})
 
+
+# ──────────────────────────────────────────────────────────────────────
+#  Dashboard Analytics
+# ──────────────────────────────────────────────────────────────────────
 class DashboardAnalyticsView(views.APIView):
-    # Allow any for development/dashboard access; TODO: restrict in production
-    permission_classes = [permissions.AllowAny]
+    """
+    Dashboard analytics — scoped to authenticated user's tenant.
+    Only TURF_ADMIN, STAFF, and SUPER_ADMIN can access.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsStaffOrOwner]
 
     def get_tenant(self, request):
-        if request.user.is_authenticated and hasattr(request.user, 'owned_tenant'):
-            try:
-                return request.user.owned_tenant
-            except Exception:
-                pass
-        # Fallback: use first available tenant (for dev/anonymous access)
-        from tenants.models import Tenant
-        return Tenant.objects.first()
+        user = request.user
+        if user.role == 'SUPER_ADMIN':
+            # Super admin: optionally filter by tenant_id param, or return all
+            from tenants.models import Tenant
+            tenant_id = request.query_params.get('tenant_id')
+            if tenant_id:
+                try:
+                    return Tenant.objects.get(id=tenant_id)
+                except Tenant.DoesNotExist:
+                    return None
+            return None  # Means "all tenants"
+
+        return _get_user_tenant(user)
 
     def get(self, request, metric=None):
         tenant = self.get_tenant(request)
-        if not tenant:
-            return Response({"error": "No tenant found. Please seed data first."}, status=404)
+
+        # For turf admins, tenant is mandatory
+        if request.user.role == 'TURF_ADMIN' and not tenant:
+            return Response(
+                {"success": False, "message": "No tenant associated with your account."},
+                status=http_status.HTTP_404_NOT_FOUND,
+            )
 
         today = timezone.now().date()
         # Strictly exclude CANCELLED from all counts/sums
-        base_queryset = Booking.objects.filter(court__tenant=tenant).exclude(status='CANCELLED')
+        base_queryset = Booking.objects.exclude(status='CANCELLED')
+        if tenant:
+            base_queryset = base_queryset.filter(court__tenant=tenant)
 
         if metric == 'today-bookings':
             count = base_queryset.filter(date=today).count()
-            return Response({"count": count})
+            return Response({"success": True, "data": {"count": count}})
 
         elif metric == 'today-revenue':
             # Only CONFIRMED counts as revenue in production
             revenue = base_queryset.filter(date=today, status='CONFIRMED').aggregate(total=Sum('total_price'))['total'] or 0
-            return Response({"revenue": float(revenue)})
+            return Response({"success": True, "data": {"revenue": float(revenue)}})
 
         elif metric == 'total-bookings':
             count = base_queryset.count()
-            return Response({"count": count})
+            return Response({"success": True, "data": {"count": count}})
 
         elif metric == 'court-stats':
             stats = base_queryset.values('court__name').annotate(count=Count('id')).order_by('-count')
-            return Response(list(stats))
+            return Response({"success": True, "data": list(stats)})
 
         elif metric == 'reports-summary':
             bookings = list(base_queryset.values(
@@ -272,8 +386,9 @@ class DashboardAnalyticsView(views.APIView):
                 
             # Seed ALL courts for the tenant keyed by ID to handle same-name courts
             SPORT_TYPE_LABELS = dict(Court.SPORT_CHOICES)
+            court_queryset = Court.objects.filter(tenant=tenant) if tenant else Court.objects.all()
             court_data = {}
-            for c in Court.objects.filter(tenant=tenant):
+            for c in court_queryset:
                 sport_label = SPORT_TYPE_LABELS.get(c.sport_type, c.sport_type)
                 label = f"{c.name} ({sport_label})" if c.name else f"Court {c.id}"
                 court_data[c.id] = {'label': label, 'count': 0}
@@ -359,16 +474,22 @@ class DashboardAnalyticsView(views.APIView):
             }
 
             return Response({
-                "kpi": {
-                    "total_bookings": total_bookings,
-                    "total_revenue": float(total_revenue),
-                    "unique_customers": unique_customers,
-                    "avg_revenue_day": float(round(avg_revenue_day, 2))
-                },
-                "weekly_data": weekly_data,
-                "court_utilization": court_utilization,
-                "peak_hours": peak_hours,
-                "performance_summary": performance_summary,
+                "success": True,
+                "data": {
+                    "kpi": {
+                        "total_bookings": total_bookings,
+                        "total_revenue": float(total_revenue),
+                        "unique_customers": unique_customers,
+                        "avg_revenue_day": float(round(avg_revenue_day, 2))
+                    },
+                    "weekly_data": weekly_data,
+                    "court_utilization": court_utilization,
+                    "peak_hours": peak_hours,
+                    "performance_summary": performance_summary,
+                }
             })
 
-        return Response({"error": "Invalid metric"}, status=400)
+        return Response(
+            {"success": False, "message": "Invalid metric."},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )

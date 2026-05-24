@@ -1,6 +1,7 @@
 import { Bell, Search, Settings, Moon, Sun, Menu, Clock } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
+import type { User } from '../../types';
 
 interface HeaderProps {
   title: string;
@@ -12,9 +13,10 @@ interface HeaderProps {
   onToggleDarkMode?: () => void;
   onMenuClick?: () => void;
   isMobileMenuOpen?: boolean;
+  user?: User | null;
 }
 
-export function Header({ title, subtitle, onBrandingClick, onReportsClick, onSettingsClick, isDark, onToggleDarkMode, onMenuClick, isMobileMenuOpen }: HeaderProps) {
+export function Header({ title, subtitle, onBrandingClick, onReportsClick, onSettingsClick, isDark, onToggleDarkMode, onMenuClick, isMobileMenuOpen, user }: HeaderProps) {
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -177,6 +179,18 @@ export function Header({ title, subtitle, onBrandingClick, onReportsClick, onSet
               </div>
             )}
           </div>
+          {/* User Avatar */}
+          {user && (
+            <div
+              className="w-9 sm:w-10 h-9 sm:h-10 rounded-full bg-gradient-to-br from-[#10b981] to-[#3b82f6] flex items-center justify-center flex-shrink-0 cursor-default select-none"
+              title={user.email || user.username}
+              aria-label={`Logged in as ${user.username}`}
+            >
+              <span className="text-white font-semibold text-xs sm:text-sm">
+                {user.username ? user.username.slice(0, 2).toUpperCase() : 'U'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

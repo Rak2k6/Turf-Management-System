@@ -1,10 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Calendar as CalendarIcon, List, CheckCircle, Clock, XCircle, Search, RefreshCw } from 'lucide-react';
-import { api } from '../../services/api';
+import { Calendar as CalendarIcon, List, CheckCircle, XCircle, Search, RefreshCw, Clock } from 'lucide-react';
+import { SkeletonCard } from '../shared/SkeletonCard';
+import { bookingService } from '../../services/bookingService';
+import { extractApiError } from '../../services/api';
+import { toast } from 'sonner';
+import type { Booking } from '../../types';
+
+interface TransformedBooking {
+  id: number;
+  court: string;
+  customer: string;
+  date: string;
+  time: string;
+  isExpired: boolean;
+  status: string;
+  price: number;
+  phone: string;
+}
 
 export function BookingsManagement() {
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('list');
-  const [bookings, setBookings] = useState<any[]>([]);
+  const [bookings, setBookings] = useState<TransformedBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -14,12 +30,10 @@ export function BookingsManagement() {
   const fetchBookings = useCallback(async () => {
     try {
       setRefreshing(true);
-      const response = await api.get('/bookings/');
-      const allBookings = response.data.results || response.data;
+      const allBookings = await bookingService.getBookings();
       
       // Transform API data to match UI expectations
-      const transformedBookings = allBookings.map((b: any, index: number) => {
-        // Parse start_time and end_time to extract times
+      const transformedBookings: TransformedBooking[] = allBookings.map((b: Booking) => {
         const startTime = new Date(b.start_time);
         const endTime = new Date(b.end_time);
         const startHour = startTime.getHours().toString().padStart(2, '0');
@@ -31,9 +45,9 @@ export function BookingsManagement() {
         const isExpired = endTime < now;
         
         return {
-          id: b.id || index,
+          id: b.id,
           court: b.court_name || 'N/A',
-          customer: b.customer_name || b.customer || 'Walk-in Customer',
+          customer: b.customer_name || 'Walk-in Customer',
           date: b.date,
           time: `${startHour}:${startMin} - ${endHour}:${endMin}`,
           isExpired,
@@ -41,7 +55,7 @@ export function BookingsManagement() {
                   b.status === 'PENDING' ? 'Pending' : 
                   b.status === 'CANCELLED' ? 'Cancelled' : 
                   b.status === 'SUBMITTED' ? 'Submitted' : b.status,
-          price: parseFloat(b.total_price || 0),
+          price: parseFloat(String(b.total_price || 0)),
           phone: b.customer_phone || 'N/A'
         };
       });
@@ -49,6 +63,7 @@ export function BookingsManagement() {
       setBookings(transformedBookings);
     } catch (err) {
       console.error('Error fetching bookings:', err);
+      toast.error(extractApiError(err));
       setBookings([]);
     } finally {
       setLoading(false);
@@ -59,7 +74,7 @@ export function BookingsManagement() {
   // Fetch on mount and set up auto-refresh
   useEffect(() => {
     fetchBookings();
-    const interval = setInterval(fetchBookings, 10000);
+    const interval = setInterval(fetchBookings, 30000);
     return () => clearInterval(interval);
   }, [fetchBookings]);
 
@@ -70,7 +85,6 @@ export function BookingsManagement() {
         fetchBookings();
       }
     };
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [fetchBookings]);
@@ -82,38 +96,50 @@ export function BookingsManagement() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleStatusChange = async (bookingId: string | number, currentStatus: string) => {
-    if (currentStatus === 'Pending') {
-      // Optimistically update UI
-      setBookings(prevBookings => 
-        prevBookings.map(b => b.id === bookingId ? { ...b, status: 'Submitted' } : b)
-      );
-      // Try to update backend if endpoint supports it, ignore errors otherwise
-      try { 
-        await api.patch(`/bookings/${bookingId}/`, { status: 'SUBMITTED' }); 
-        window.dispatchEvent(new Event('bookingStatusUpdated'));
-      } catch(e) {}
+  const handleConfirm = async (bookingId: number) => {
+    try {
+      await bookingService.confirmBooking(bookingId);
+      toast.success('Booking confirmed');
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'Confirmed' } : b));
+    } catch (err) {
+      toast.error(extractApiError(err));
     }
   };
 
-  const getStatusBadge = (status: string, bookingId?: string | number, isExpired?: boolean) => {
-    const styles = {
+  const handleCancel = async (bookingId: number) => {
+    try {
+      await bookingService.cancelBooking(bookingId);
+      toast.success('Booking cancelled');
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'Cancelled' } : b));
+    } catch (err) {
+      toast.error(extractApiError(err));
+    }
+  };
+
+  const handleStatusChange = async (bookingId: number, currentStatus: string) => {
+    if (currentStatus === 'Pending') {
+      await handleConfirm(bookingId);
+    }
+  };
+
+  const getStatusBadge = (status: string, bookingId?: number, isExpired?: boolean) => {
+    const styles: Record<string, string> = {
       Confirmed: 'bg-muted text-[#10b981]',
       Pending: `bg-muted text-[#f59e0b] cursor-pointer hover:bg-[#f59e0b]/20 ${isExpired ? 'animate-[pulse_2s_ease-in-out_infinite] ring-2 ring-[#f59e0b]/50' : ''}`,
       Cancelled: 'bg-muted text-[#ef4444]',
       Submitted: 'bg-muted text-[#3b82f6]'
     };
-    const icons = {
+    const icons: Record<string, typeof CheckCircle> = {
       Confirmed: CheckCircle,
       Pending: Clock,
       Cancelled: XCircle,
       Submitted: CheckCircle
     };
-    const Icon = icons[status as keyof typeof icons] || Clock;
+    const Icon = icons[status] || Clock;
     return (
       <span 
         onClick={() => bookingId && status === 'Pending' ? handleStatusChange(bookingId, status) : undefined}
-        className={`inline-flex items-center gap-1 px-2.5 py-1 ${styles[status as keyof typeof styles] || styles.Pending} rounded-full text-xs font-medium transition-colors`}
+        className={`inline-flex items-center gap-1 px-2.5 py-1 ${styles[status] || styles.Pending} rounded-full text-xs font-medium transition-colors`}
       >
         <Icon className="w-3 h-3" />
         {status}
@@ -183,20 +209,18 @@ export function BookingsManagement() {
         </div>
       </div>
 
-      {/* Bookings List */}
       {viewMode === 'list' && (
-        <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="space-y-6">
           {loading ? (
-            <div className="p-8 text-center text-muted-foreground">
-              <Clock className="w-8 h-8 mx-auto mb-2 animate-spin" />
-              <p>Loading bookings...</p>
-            </div>
+            <SkeletonCard type="table" count={6} />
           ) : filteredBookings.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
+            <div className="bg-card rounded-xl border border-border shadow-sm p-8 text-center text-muted-foreground">
+              <CalendarIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
               <p>No bookings found</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full min-w-max">
                 <thead className="bg-muted">
                   <tr>
@@ -207,6 +231,7 @@ export function BookingsManagement() {
                     <th className="text-left px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium text-foreground">Time</th>
                     <th className="text-left px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium text-foreground">Status</th>
                     <th className="text-left px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium text-foreground">Price</th>
+                    <th className="text-left px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium text-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -219,11 +244,40 @@ export function BookingsManagement() {
                       <td className="px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm text-muted-foreground whitespace-nowrap">{booking.time}</td>
                       <td className="px-3 md:px-6 py-3 md:py-4">{getStatusBadge(booking.status, booking.id, booking.isExpired)}</td>
                       <td className="px-3 md:px-6 py-3 md:py-4 text-xs md:text-sm font-medium text-foreground">₹{booking.price}</td>
+                      <td className="px-3 md:px-6 py-3 md:py-4">
+                        <div className="flex gap-1">
+                          {booking.status === 'Pending' && (
+                            <>
+                              <button
+                                onClick={() => handleConfirm(booking.id)}
+                                className="px-2 py-1 bg-emerald-500/10 text-emerald-500 rounded text-xs hover:bg-emerald-500/20"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => handleCancel(booking.id)}
+                                className="px-2 py-1 bg-red-500/10 text-red-500 rounded text-xs hover:bg-red-500/20"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          )}
+                          {booking.status === 'Confirmed' && (
+                            <button
+                              onClick={() => handleCancel(booking.id)}
+                              className="px-2 py-1 bg-red-500/10 text-red-500 rounded text-xs hover:bg-red-500/20"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          </div>
           )}
         </div>
       )}

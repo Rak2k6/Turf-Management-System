@@ -1,14 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { StatCard } from '../shared/StatCard';
+import { SkeletonCard } from '../shared/SkeletonCard';
 import { Calendar, DollarSign, Users, Clock, CheckCircle, RefreshCw } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { api } from '../../services/api';
+import { bookingService } from '../../services/bookingService';
+import { extractApiError } from '../../services/api';
+import { toast } from 'sonner';
+import type { Booking } from '../../types';
+
+interface WeeklyPoint {
+  name: string;
+  revenue: number;
+  bookings: number;
+}
 
 export function TurfAdminDashboard() {
-  const [bookings, setBookings] = useState<any[]>([]);
-  const [revenueData, setRevenueData] = useState<any[]>([]);
-  const [bookingData, setBookingData] = useState<any[]>([]);
-  const [todayBookings, setTodayBookings] = useState<any[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [revenueData, setRevenueData] = useState<{ name: string; revenue: number }[]>([]);
+  const [bookingData, setBookingData] = useState<{ name: string; bookings: number }[]>([]);
+  const [todayBookings, setTodayBookings] = useState<Booking[]>([]);
   const [stats, setStats] = useState({
     totalBookings: 0,
     totalRevenue: 0,
@@ -22,19 +32,18 @@ export function TurfAdminDashboard() {
   const fetchData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const response = await api.get('/bookings/');
-      const allBookings = response.data.results || response.data;
+      const allBookings = await bookingService.getBookings();
       setBookings(allBookings);
 
       // Calculate stats
-      const totalRevenue = allBookings.reduce((sum: number, b: any) => sum + parseFloat(b.total_price || 0), 0);
-      const uniqueCustomers = new Set(allBookings.map((b: any) => b.customer_name || b.customer).filter(Boolean)).size;
+      const totalRevenue = allBookings.reduce((sum, b) => sum + parseFloat(String(b.total_price || 0)), 0);
+      const uniqueCustomers = new Set(allBookings.map((b) => b.customer_name || b.customer).filter(Boolean)).size;
       
       // Calculate dynamic average booking duration
       let totalDurationMins = 0;
       let validDurationsCount = 0;
       
-      allBookings.forEach((b: any) => {
+      allBookings.forEach((b) => {
         if (b.start_time && b.end_time) {
           const start = new Date(b.start_time);
           const end = new Date(b.end_time);
@@ -58,19 +67,16 @@ export function TurfAdminDashboard() {
 
       // Get today's bookings
       const today = new Date().toISOString().split('T')[0];
-      const todayBookingsList = allBookings.filter((b: any) => b.date === today);
+      const todayBookingsList = allBookings.filter((b) => b.date === today);
       setTodayBookings(todayBookingsList.slice(0, 5));
 
       // Generate weekly data from bookings
       const weeklyStats = generateWeeklyData(allBookings);
-      setRevenueData(weeklyStats.revenue);
-      setBookingData(weeklyStats.bookings);
+      setRevenueData(weeklyStats.map(d => ({ name: d.name, revenue: d.revenue })));
+      setBookingData(weeklyStats.map(d => ({ name: d.name, bookings: d.bookings })));
     } catch (err) {
       console.error('Error fetching bookings:', err);
-      // Fallback to demo data
-      setRevenueData(demoRevenueData);
-      setBookingData(demoBookingData);
-      setTodayBookings(demoTodayBookings);
+      toast.error(extractApiError(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -80,10 +86,7 @@ export function TurfAdminDashboard() {
   // Fetch on mount
   useEffect(() => {
     fetchData();
-
-    // Set up auto-refresh every 10 seconds to pick up new bookings
-    const interval = setInterval(fetchData, 10000);
-    
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -94,64 +97,44 @@ export function TurfAdminDashboard() {
         fetchData();
       }
     };
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [fetchData]);
 
   // Generate weekly data from bookings
-  const generateWeeklyData = (allBookings: any[]) => {
+  const generateWeeklyData = (allBookings: Booking[]): WeeklyPoint[] => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const revenue: any[] = [];
-    const bookingCounts: any[] = [];
+    const weeklyData: WeeklyPoint[] = days.map(name => ({ name, revenue: 0, bookings: 0 }));
 
-    days.forEach(day => {
-      revenue.push({ name: day, revenue: 0 });
-      bookingCounts.push({ name: day, bookings: 0 });
-    });
-
-    allBookings.forEach((booking: any) => {
+    allBookings.forEach((booking) => {
       const date = new Date(booking.date);
-      // getDay() returns 0=Sunday, 1=Monday, ..., 6=Saturday
-      // But days array has Monday at index 0, so we adjust: Sunday(0)->6, Monday(1)->0, etc.
       const dayIndex = (date.getDay() === 0) ? 6 : date.getDay() - 1;
-      const revenuAmount = parseFloat(booking.total_price || 0);
+      const revenueAmount = parseFloat(String(booking.total_price || 0));
       
-      if (revenue[dayIndex]) {
-        revenue[dayIndex].revenue += revenuAmount;
-        bookingCounts[dayIndex].bookings += 1;
+      if (weeklyData[dayIndex]) {
+        weeklyData[dayIndex].revenue += revenueAmount;
+        weeklyData[dayIndex].bookings += 1;
       }
     });
 
-    return { revenue, bookings: bookingCounts };
+    return weeklyData;
   };
 
-  // Demo data fallback
-  const demoRevenueData = [
-    { name: 'Mon', revenue: 2400 },
-    { name: 'Tue', revenue: 3200 },
-    { name: 'Wed', revenue: 2800 },
-    { name: 'Thu', revenue: 3900 },
-    { name: 'Fri', revenue: 4200 },
-    { name: 'Sat', revenue: 5100 },
-    { name: 'Sun', revenue: 4800 },
-  ];
-
-  const demoBookingData = [
-    { name: 'Mon', bookings: 12 },
-    { name: 'Tue', bookings: 16 },
-    { name: 'Wed', bookings: 14 },
-    { name: 'Thu', bookings: 19 },
-    { name: 'Fri', bookings: 22 },
-    { name: 'Sat', bookings: 28 },
-    { name: 'Sun', bookings: 25 },
-  ];
-
-  const demoTodayBookings = [
-    { id: 1, court: 'Court A', customer_name: 'John Smith', start_time: '09:00 AM', status: 'CONFIRMED', total_price: 50 },
-    { id: 2, court: 'Court B', customer_name: 'Sarah Johnson', start_time: '10:00 AM', status: 'CONFIRMED', total_price: 50 },
-    { id: 3, court: 'Court A', customer_name: 'Michael Brown', start_time: '11:00 AM', status: 'PENDING', total_price: 50 },
-  ];
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+          <SkeletonCard count={4} type="stat" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+          <SkeletonCard count={2} type="chart" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -267,42 +250,49 @@ export function TurfAdminDashboard() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm sm:text-base">
-            <thead className="bg-muted">
-              <tr>
-                <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground">Court</th>
-                <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground hidden sm:table-cell">Customer</th>
-                <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground">Time</th>
-                <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground">Status</th>
-                <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground hidden md:table-cell">Price</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {todayBookings.map((booking) => (
-                <tr key={booking.id} className="hover:bg-muted/50 transition-colors">
-                  <td className="px-3 sm:px-6 py-3 sm:py-4 font-medium text-foreground text-xs sm:text-sm">{booking.court?.name || 'Court'}</td>
-                  <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-foreground hidden sm:table-cell">{booking.customer_name || 'Walk-in'}</td>
-                  <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-muted-foreground">{new Date(booking.start_time).toLocaleTimeString()}</td>
-                  <td className="px-3 sm:px-6 py-3 sm:py-4">
-                    {booking.status === 'CONFIRMED' ? (
-                      <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 bg-muted text-[#10b981] rounded-full text-xs font-medium">
-                        <CheckCircle className="w-3 h-3" />
-                        <span className="hidden sm:inline">Confirmed</span>
-                        <span className="sm:hidden">OK</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 bg-muted text-[#f59e0b] rounded-full text-xs font-medium">
-                        <Clock className="w-3 h-3" />
-                        <span className="hidden sm:inline">Pending</span>
-                        <span className="sm:hidden">...</span>
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground hidden md:table-cell">₹{booking.total_price}</td>
+          {todayBookings.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground">
+              <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No bookings for today</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm sm:text-base">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground">Court</th>
+                  <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground hidden sm:table-cell">Customer</th>
+                  <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground">Time</th>
+                  <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground">Status</th>
+                  <th className="text-left px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground hidden md:table-cell">Price</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {todayBookings.map((booking) => (
+                  <tr key={booking.id} className="hover:bg-muted/50 transition-colors">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 font-medium text-foreground text-xs sm:text-sm">{booking.court_name || 'Court'}</td>
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-foreground hidden sm:table-cell">{booking.customer_name || 'Walk-in'}</td>
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-muted-foreground">{new Date(booking.start_time).toLocaleTimeString()}</td>
+                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                      {booking.status === 'CONFIRMED' ? (
+                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 bg-muted text-[#10b981] rounded-full text-xs font-medium">
+                          <CheckCircle className="w-3 h-3" />
+                          <span className="hidden sm:inline">Confirmed</span>
+                          <span className="sm:hidden">OK</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 bg-muted text-[#f59e0b] rounded-full text-xs font-medium">
+                          <Clock className="w-3 h-3" />
+                          <span className="hidden sm:inline">Pending</span>
+                          <span className="sm:hidden">...</span>
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-foreground hidden md:table-cell">₹{booking.total_price}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
